@@ -669,7 +669,7 @@ export default function App() {
   
   // Initialize Gemini AI
   const ai = useMemo(() => {
-    const key = process.env.GEMINI_API_KEY;
+    const key = import.meta.env.VITE_GEMINI_API_KEY;
     console.log("AI: Inicializando GoogleGenAI. Chave presente:", !!key);
     return new GoogleGenAI({ apiKey: key || "" });
   }, []);
@@ -1276,7 +1276,7 @@ SEM ENTRADA NO MOMENTO
     if (nextActiveState) {
       console.log(`Bot: Verificando condições para ativação. Dias: ${user.availableDays}, Saldo: ${user.balance}`);
       
-      if (!process.env.GEMINI_API_KEY) {
+      if (!import.meta.env.VITE_GEMINI_API_KEY) {
         console.log("Bot: Bloqueado por falta de chave API Gemini.");
         setBotError("IA não configurada: Chave API Gemini ausente. Configure nos Segredos.");
         setTimeout(() => setBotError(''), 8000);
@@ -1329,7 +1329,7 @@ SEM ENTRADA NO MOMENTO
     setIsTestingAI(true);
     setAiTestResult(null);
     try {
-      const key = process.env.GEMINI_API_KEY;
+      const key = import.meta.env.VITE_GEMINI_API_KEY;
       if (!key) {
         throw new Error("API Key não configurada nos Segredos do projeto.");
       }
