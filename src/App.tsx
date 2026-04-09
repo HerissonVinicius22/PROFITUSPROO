@@ -1021,11 +1021,17 @@ SEM ENTRADA NO MOMENTO
       
       // Persist to backend
       if (user?.uid) {
-        fetch(`/api/history/${user.uid}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newTrade)
-        }).catch(err => console.error("Error saving trade:", err));
+        supabase.from('trades').insert([{
+           id: Math.random().toString(36).substr(2, 9),
+           user_id: user.uid,
+           pair: newTrade.pair,
+           entry_time: newTrade.entryTime,
+           exit_time: newTrade.exitTime,
+           result: newTrade.result,
+           value: newTrade.value
+        }]).then(({ error }) => {
+           if (error) console.error("Error saving trade:", error);
+        });
       }
 
       setHistory(prev => [{ ...newTrade, id: Math.random().toString(36).substr(2, 9) }, ...prev]);
@@ -1083,8 +1089,14 @@ SEM ENTRADA NO MOMENTO
 
   const fetchGlobalConfig = async () => {
     try {
-      const res = await fetch('/api/global-config');
-      if (res.ok) setGlobalConfig(await res.json());
+      const { data, error } = await supabase.from('global_config').select('*').single();
+      if (!error && data) setGlobalConfig({
+        pixKey: data.pix_key,
+        plan1_amount: data.plan1_amount, plan1_pix: data.plan1_pix,
+        plan2_amount: data.plan2_amount, plan2_pix: data.plan2_pix,
+        plan3_amount: data.plan3_amount, plan3_pix: data.plan3_pix,
+        plan4_amount: data.plan4_amount, plan4_pix: data.plan4_pix
+      });
     } catch (error) {
       console.error("Error fetching global config:", error);
     }
@@ -1093,14 +1105,9 @@ SEM ENTRADA NO MOMENTO
   const checkUsage = async () => {
     if (!user) return;
     try {
-      const res = await fetch('/api/user/usage/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser(prev => prev ? { ...prev, availableDays: data.availableDays, balance: data.balance } : null);
+      const { data, error } = await supabase.from('users').select('available_days, balance').eq('uid', user.uid).single();
+      if (!error && data) {
+        setUser(prev => prev ? { ...prev, availableDays: data.available_days, balance: data.balance } : null);
       }
     } catch (error) {
       console.error("Error checking usage:", error);
@@ -1109,22 +1116,36 @@ SEM ENTRADA NO MOMENTO
   const fetchUserData = async (uid: string, initial = false) => {
     try {
       const [userRes, configRes, historyRes, withdrawsRes] = await Promise.all([
-        fetch(`/api/user/${uid}`),
-        fetch(`/api/config/${uid}`),
-        fetch(`/api/history/${uid}`),
-        fetch(`/api/admin/withdrawals`)
+        supabase.from('users').select('*').eq('uid', uid).single(),
+        supabase.from('configs').select('*').eq('user_id', uid).single(),
+        supabase.from('trades').select('*').eq('user_id', uid),
+        supabase.from('withdraw_requests').select('*').eq('user_id', uid)
       ]);
       
-      if (userRes.ok) {
-        const u = await userRes.json();
+      if (!userRes.error && userRes.data) {
+        const u = {
+           uid: userRes.data.uid, username: userRes.data.username,
+           firstName: userRes.data.first_name, lastName: userRes.data.last_name, fullName: userRes.data.full_name,
+           cpf: userRes.data.cpf, email: userRes.data.email, password: userRes.data.password, whatsapp: userRes.data.whatsapp,
+           role: userRes.data.role, status: userRes.data.status, createdAt: userRes.data.created_at,
+           availableDays: userRes.data.available_days, balance: userRes.data.balance
+        };
         setUser(u);
         localStorage.setItem('profitus_user', JSON.stringify(u));
       }
-      if (configRes.ok) setConfig(await configRes.json());
-      if (historyRes.ok) setHistory(await historyRes.json());
-      if (withdrawsRes.ok) {
-        const allWithdraws = await withdrawsRes.json();
-        setUserWithdrawals(allWithdraws.filter((w: any) => w.userId === uid));
+      if (!configRes.error && configRes.data) {
+        setConfig({
+           userId: configRes.data.user_id, accountType: configRes.data.account_type, isBotActive: configRes.data.is_bot_active,
+           strategy: configRes.data.strategy, timeframe: configRes.data.timeframe, dailyProfitTarget: configRes.data.daily_profit_target,
+           dailyStopLoss: configRes.data.daily_stop_loss, investmentAmount: configRes.data.investment_amount,
+           minPayout: configRes.data.min_payout, pairs: configRes.data.pairs, isAutoTrade: configRes.data.is_auto_trade
+        });
+      }
+      if (!historyRes.error && historyRes.data) {
+        setHistory(historyRes.data.map((t: any) => ({ ...t, userId: t.user_id, entryTime: t.entry_time, exitTime: t.exit_time })));
+      }
+      if (!withdrawsRes.error && withdrawsRes.data) {
+        setUserWithdrawals(withdrawsRes.data.map((w: any) => ({ ...w, userId: w.user_id, createdAt: w.created_at })));
       }
     } catch (error) {
       console.error("Error loading user data:", error);
@@ -1148,22 +1169,24 @@ SEM ENTRADA NO MOMENTO
       const fetchAdminData = async () => {
         try {
           const [usersRes, depositsRes, withdrawsRes] = await Promise.all([
-            fetch('/api/admin/users'),
-            fetch('/api/admin/deposits'),
-            fetch('/api/admin/withdrawals')
+            supabase.from('users').select('*'),
+            supabase.from('deposit_requests').select('*'),
+            supabase.from('withdraw_requests').select('*')
           ]);
-          if (usersRes.ok) {
-            const users = await usersRes.json();
-            setAllUsers(users);
-            setActiveUsersCount(users.filter((u: any) => u.status === 'active').length);
+          if (!usersRes.error && usersRes.data) {
+            const mappedUsers = usersRes.data.map(u => ({
+              uid: u.uid, username: u.username, firstName: u.first_name, lastName: u.last_name, fullName: u.full_name,
+              cpf: u.cpf, email: u.email, password: u.password, whatsapp: u.whatsapp, role: u.role, status: u.status,
+              createdAt: u.created_at, availableDays: u.available_days, balance: u.balance
+            }));
+            setAllUsers(mappedUsers);
+            setActiveUsersCount(mappedUsers.filter((u: any) => u.status === 'active').length);
           }
-          if (depositsRes.ok) {
-            const data = await depositsRes.json();
-            setDepositRequests(data);
+          if (!depositsRes.error && depositsRes.data) {
+            setDepositRequests(depositsRes.data.map(d => ({...d, userId: d.user_id, createdAt: d.created_at})));
           }
-          if (withdrawsRes.ok) {
-            const data = await withdrawsRes.json();
-            setWithdrawRequests(data);
+          if (!withdrawsRes.error && withdrawsRes.data) {
+            setWithdrawRequests(withdrawsRes.data.map(w => ({...w, userId: w.user_id, createdAt: w.created_at})));
           }
         } catch (error) {
           console.error("Error loading admin data:", error);
@@ -1181,27 +1204,54 @@ SEM ENTRADA NO MOMENTO
     setAuthError('');
     setLoading(true);
     try {
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-      const body = isLogin 
-        ? { username, password } 
-        : { username, password, whatsapp, firstName, lastName, cpf };
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setUser(data);
-        localStorage.setItem('profitus_user', JSON.stringify(data));
-        fetchUserData(data.uid);
+      if (isLogin) {
+         const { data, error } = await supabase.from('users').select('*').eq('username', username).eq('password', password).single();
+         if (data && !error) {
+            if (data.status === 'blocked') {
+                setAuthError('Sua conta está bloqueada.');
+                setLoading(false);
+                return;
+            }
+            const u = {
+               uid: data.uid, username: data.username, firstName: data.first_name, lastName: data.last_name, fullName: data.full_name,
+               cpf: data.cpf, email: data.email, password: data.password, whatsapp: data.whatsapp, role: data.role, status: data.status,
+               createdAt: data.created_at, availableDays: data.available_days, balance: data.balance
+            };
+            setUser(u);
+            localStorage.setItem('profitus_user', JSON.stringify(u));
+            fetchUserData(u.uid);
+         } else {
+            setAuthError('Usuário ou senha incorretos.');
+         }
       } else {
-        setAuthError(data.error || 'Ocorreu um erro.');
+         const { data: existing } = await supabase.from('users').select('uid').eq('username', username).single();
+         if (existing) {
+             setAuthError("Usuário já cadastrado.");
+             setLoading(false);
+             return;
+         }
+         const uid = Math.random().toString(36).substr(2, 9);
+         const newUser = {
+            uid, username, first_name: firstName, last_name: lastName, full_name: `${firstName} ${lastName}`,
+            cpf, email: `${username}@example.com`, password, whatsapp, role: "user", status: "active", available_days: 0, balance: 0
+         };
+         const { data, error } = await supabase.from('users').insert([newUser]).select().single();
+         if (error || !data) {
+            setAuthError("Erro ao registrar no banco.");
+         } else {
+            await supabase.from('configs').insert([{ user_id: uid, account_type: "demo", is_bot_active: false, strategy: "AUTO_BEST", timeframe: "M1", daily_profit_target: 100, daily_stop_loss: 50, investment_amount: 5, min_payout: 80, pairs: ["EUR/USD", "GBP/USD", "USD/JPY"] }]);
+            const u = {
+               uid: data.uid, username: data.username, firstName: data.first_name, lastName: data.last_name, fullName: data.full_name,
+               cpf: data.cpf, email: data.email, password: data.password, whatsapp: data.whatsapp, role: data.role, status: data.status,
+               createdAt: data.created_at, availableDays: data.available_days, balance: data.balance
+            };
+            setUser(u);
+            localStorage.setItem('profitus_user', JSON.stringify(u));
+            fetchUserData(uid);
+         }
       }
     } catch (error: any) {
-      setAuthError('Erro de conexão com o servidor.');
+      setAuthError('Erro de conexão com o banco de dados.');
     } finally {
       setLoading(false);
     }
@@ -1250,13 +1300,9 @@ SEM ENTRADA NO MOMENTO
     }
 
     try {
-      const res = await fetch(`/api/config/${user.uid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isBotActive: nextActiveState })
-      });
-      if (res.ok) {
-        const updatedConfig = await res.json();
+      const { data, error } = await supabase.from('configs').update({ is_bot_active: nextActiveState }).eq('user_id', user.uid).select().single();
+      if (!error && data) {
+        const updatedConfig = { ...config, isBotActive: nextActiveState };
         console.log("Bot: Configuração atualizada com sucesso:", updatedConfig);
         setConfig(updatedConfig);
         if (nextActiveState) {
@@ -1264,8 +1310,7 @@ SEM ENTRADA NO MOMENTO
           startBotCycle();
         }
       } else {
-        const errorData = await res.json();
-        console.error("Bot: Erro ao atualizar configuração:", errorData);
+        console.error("Bot: Erro ao atualizar configuração:", error);
         setBotError("Erro ao ativar o robô no servidor.");
       }
     } catch (error) {
@@ -1321,15 +1366,22 @@ SEM ENTRADA NO MOMENTO
     if (!config || !user) return;
     setIsSaving(true);
     try {
-      const res = await fetch(`/api/config/${user.uid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
-      if (res.ok) {
-        const newConfig = await res.json();
-        setConfig(newConfig);
-        setLocalConfig(newConfig);
+      const mappedUpdates: any = {};
+      if (updates.accountType) mappedUpdates.account_type = updates.accountType;
+      if (updates.isBotActive !== undefined) mappedUpdates.is_bot_active = updates.isBotActive;
+      if (updates.strategy) mappedUpdates.strategy = updates.strategy;
+      if (updates.timeframe) mappedUpdates.timeframe = updates.timeframe;
+      if (updates.dailyProfitTarget) mappedUpdates.daily_profit_target = updates.dailyProfitTarget;
+      if (updates.dailyStopLoss) mappedUpdates.daily_stop_loss = updates.dailyStopLoss;
+      if (updates.investmentAmount) mappedUpdates.investment_amount = updates.investmentAmount;
+      if (updates.minPayout) mappedUpdates.min_payout = updates.minPayout;
+      if (updates.pairs) mappedUpdates.pairs = updates.pairs;
+      if (updates.isAutoTrade !== undefined) mappedUpdates.is_auto_trade = updates.isAutoTrade;
+
+      const { data, error } = await supabase.from('configs').update(mappedUpdates).eq('user_id', user.uid).select().single();
+      if (!error && data) {
+        setConfig({ ...config, ...updates });
+        setLocalConfig({ ...config, ...updates });
         setIsDirty(false);
       }
     } catch (error) {
@@ -1341,14 +1393,10 @@ SEM ENTRADA NO MOMENTO
 
   const toggleUserStatus = async (targetUserId: string, currentStatus: UserStatus) => {
     try {
-      const res = await fetch(`/api/admin/users/${targetUserId}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: currentStatus === 'active' ? 'blocked' : 'active' })
-      });
-      if (res.ok) {
-        const updatedUser = await res.json();
-        setAllUsers(prev => prev.map(u => u.uid === targetUserId ? updatedUser : u));
+      const newStatus = currentStatus === 'active' ? 'blocked' : 'active';
+      const { data, error } = await supabase.from('users').update({ status: newStatus }).eq('uid', targetUserId).select().single();
+      if (!error && data) {
+         setAllUsers(prev => prev.map(u => u.uid === targetUserId ? { ...u, status: data.status as UserStatus } : u));
       }
     } catch (error) {
       console.error("Error toggling user status:", error);
@@ -1357,14 +1405,9 @@ SEM ENTRADA NO MOMENTO
 
   const updateUserDays = async (targetUserId: string, newDays: number) => {
     try {
-      const res = await fetch(`/api/admin/users/${targetUserId}/days`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ availableDays: newDays })
-      });
-      if (res.ok) {
-        const updatedUser = await res.json();
-        setAllUsers(prev => prev.map(u => u.uid === targetUserId ? updatedUser : u));
+      const { data, error } = await supabase.from('users').update({ available_days: newDays }).eq('uid', targetUserId).select().single();
+      if (!error && data) {
+        setAllUsers(prev => prev.map(u => u.uid === targetUserId ? { ...u, availableDays: data.available_days } : u));
       }
     } catch (error) {
       console.error("Error updating user days:", error);
@@ -1373,15 +1416,8 @@ SEM ENTRADA NO MOMENTO
 
   const updateUserMargin = async (targetUserId: string, margin: number) => {
     try {
-      const res = await fetch(`/api/admin/users/${targetUserId}/margin`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ margin })
-      });
-      if (res.ok) {
-        // Refresh admin data to see changes
-        // fetchAdminData(); // This is already polling
-      }
+      const { error } = await supabase.from('users').update({ balance: margin }).eq('uid', targetUserId);
+      if (error) console.error("Error updating user margin:", error);
     } catch (error) {
       console.error("Error updating user margin:", error);
     }
@@ -1389,12 +1425,8 @@ SEM ENTRADA NO MOMENTO
 
   const updateCredentials = async (targetUserId: string, credentials: { username?: string, password?: string }) => {
     try {
-      const res = await fetch(`/api/admin/users/${targetUserId}/credentials`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(credentials)
-      });
-      if (res.ok) {
+      const { error } = await supabase.from('users').update(credentials).eq('uid', targetUserId);
+      if (!error) {
         setShowEditCredentialsModal(false);
         alert('Credenciais atualizadas com sucesso!');
       }
@@ -1407,16 +1439,15 @@ SEM ENTRADA NO MOMENTO
     if (!user) return;
     setIsCreatingDeposit(true);
     try {
-      const res = await fetch('/api/deposits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.uid,
+      const newReq = {
+          id: Math.random().toString(36).substr(2, 9),
+          user_id: user.uid,
           username: user.username,
-          amount
-        })
-      });
-      if (res.ok) {
+          amount,
+          status: 'pending'
+      };
+      const { error } = await supabase.from('deposit_requests').insert([newReq]);
+      if (!error) {
         setSelectedDepositAmount(amount);
       }
     } catch (error) {
@@ -1428,12 +1459,8 @@ SEM ENTRADA NO MOMENTO
 
   const updateDepositStatus = async (id: string, status: 'pending' | 'completed') => {
     try {
-      const res = await fetch(`/api/admin/deposits/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
-      });
-      if (res.ok) {
+      const { error } = await supabase.from('deposit_requests').update({ status }).eq('id', id);
+      if (!error) {
         setDepositRequests(prev => prev.map(d => d.id === id ? { ...d, status } : d));
       }
     } catch (error) {
@@ -1443,10 +1470,8 @@ SEM ENTRADA NO MOMENTO
 
   const deleteDepositRequest = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/deposits/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
+      const { error } = await supabase.from('deposit_requests').delete().eq('id', id);
+      if (!error) {
         setDepositRequests(prev => prev.filter(d => d.id !== id));
       }
     } catch (error) {
@@ -1458,18 +1483,17 @@ SEM ENTRADA NO MOMENTO
     if (!user) return;
     setIsCreatingWithdraw(true);
     try {
-      const res = await fetch('/api/withdrawals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.uid,
+      const newReq = {
+          id: Math.random().toString(36).substr(2, 9),
+          user_id: user.uid,
           username: user.username,
           amount,
           method,
-          details
-        })
-      });
-      if (res.ok) {
+          details,
+          status: 'pending'
+      };
+      const { error } = await supabase.from('withdraw_requests').insert([newReq]);
+      if (!error) {
         setShowWithdrawModal(false);
         alert("Solicitação de saque enviada com sucesso! Prazo de até 48 horas.");
       }
@@ -1482,12 +1506,8 @@ SEM ENTRADA NO MOMENTO
 
   const updateWithdrawStatus = async (id: string, status: 'completed' | 'cancelled') => {
     try {
-      const res = await fetch(`/api/admin/withdrawals/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
-      });
-      if (res.ok) {
+      const { error } = await supabase.from('withdraw_requests').update({ status }).eq('id', id);
+      if (!error) {
         setWithdrawRequests(prev => prev.map(w => w.id === id ? { ...w, status } : w));
       }
     } catch (error) {
@@ -1497,10 +1517,8 @@ SEM ENTRADA NO MOMENTO
 
   const deleteWithdrawRequest = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/withdrawals/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
+       const { error } = await supabase.from('withdraw_requests').delete().eq('id', id);
+      if (!error) {
         setWithdrawRequests(prev => prev.filter(w => w.id !== id));
       }
     } catch (error) {
@@ -1511,10 +1529,8 @@ SEM ENTRADA NO MOMENTO
   const deleteUser = async (targetUserId: string) => {
     if (!confirm("Tem certeza que deseja excluir este cliente?")) return;
     try {
-      const res = await fetch(`/api/admin/users/${targetUserId}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
+      const { error } = await supabase.from('users').delete().eq('uid', targetUserId);
+      if (!error) {
         setAllUsers(prev => prev.filter(u => u.uid !== targetUserId));
       }
     } catch (error) {
@@ -2719,11 +2735,16 @@ SEM ENTRADA NO MOMENTO
                   <div className="mt-6 flex justify-end">
                     <button
                       onClick={() => {
-                        fetch('/api/global-config', {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(globalConfig)
-                        }).then(() => alert('Configurações de Planos e PIX salvas!'));
+                        supabase.from('global_config').update({
+                          pix_key: globalConfig.pixKey,
+                          plan1_amount: globalConfig.plan1_amount, plan1_pix: globalConfig.plan1_pix,
+                          plan2_amount: globalConfig.plan2_amount, plan2_pix: globalConfig.plan2_pix,
+                          plan3_amount: globalConfig.plan3_amount, plan3_pix: globalConfig.plan3_pix,
+                          plan4_amount: globalConfig.plan4_amount, plan4_pix: globalConfig.plan4_pix
+                        }).eq('id', 1).then(({ error }) => {
+                          if (error) alert('Erro ao salvar no banco.');
+                          else alert('Configurações de Planos e PIX salvas!');
+                        });
                       }}
                       className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest rounded-xl transition-all text-xs flex items-center gap-2"
                     >
