@@ -784,7 +784,7 @@ SEM ENTRADA NO MOMENTO
 
       console.log("AI: Chamando Gemini API...");
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         contents: [{ parts: [{ text: prompt }] }]
       });
 
@@ -1335,7 +1335,7 @@ SEM ENTRADA NO MOMENTO
       }
       const testPrompt = "Responda apenas com a palavra 'OK' se você estiver funcionando.";
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         contents: [{ parts: [{ text: testPrompt }] }]
       });
       if (response.text.includes("OK")) {
