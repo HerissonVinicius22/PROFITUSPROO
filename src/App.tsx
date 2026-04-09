@@ -59,7 +59,9 @@ import {
   Droplets,
   Building2,
   FileText,
-  Brain
+  Brain,
+  Trophy,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
@@ -214,6 +216,124 @@ const DepositModal = ({ isOpen, onClose, onDeposit, globalConfig, isCreating, se
                   Após realizar o pagamento, sua margem será atualizada automaticamente em até 15 minutos. Caso ocorra algum atraso, entre em contato com o suporte.
                 </p>
               </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+const ResultModal = ({ isOpen, type, onClose, stats, config }: any) => {
+  const isProfit = type === 'profit';
+  
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+          />
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+            className={cn(
+              "relative w-full max-w-md overflow-hidden rounded-[2.5rem] border shadow-[0_0_50px_-12px] transition-all",
+              isProfit 
+                ? "bg-emerald-950/40 border-emerald-500/30 shadow-emerald-500/20" 
+                : "bg-red-950/40 border-red-500/30 shadow-red-500/20"
+            )}
+          >
+            {/* Background Effects */}
+            <div className={cn(
+              "absolute inset-0 opacity-20",
+              isProfit ? "bg-gradient-to-b from-emerald-500/20 to-transparent" : "bg-gradient-to-b from-red-500/20 to-transparent"
+            )} />
+            
+            <div className="relative p-8 text-center space-y-6">
+              {/* Icon Animation */}
+              <motion.div 
+                initial={{ rotate: -10, scale: 0.5 }}
+                animate={{ rotate: 0, scale: 1 }}
+                transition={{ type: "spring", damping: 12 }}
+                className={cn(
+                  "w-24 h-24 mx-auto rounded-full flex items-center justify-center border-4 shadow-xl",
+                  isProfit 
+                    ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-emerald-500/20" 
+                    : "bg-red-500/20 border-red-500/50 text-red-400 shadow-red-500/20"
+                )}
+              >
+                {isProfit ? <Trophy className="w-12 h-12" /> : <AlertTriangle className="w-12 h-12" />}
+              </motion.div>
+
+              <div className="space-y-2">
+                <motion.h2 
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.1 }}
+                  className="text-3xl font-black text-white tracking-tighter"
+                >
+                  {isProfit ? 'META ATINGIDA!' : 'STOP ATINGIDO!'}
+                </motion.h2>
+                <motion.p 
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-gray-400 text-sm font-medium px-4"
+                >
+                  {isProfit 
+                    ? 'Parabéns! Você alcançou sua meta de lucro diária com sucesso. Gestão impecável!' 
+                    : 'Atenção. Seu limite de perda diária foi atingido. O robô parou para preservar seu capital.'}
+                </motion.p>
+              </div>
+
+              {/* Stats Summary Area */}
+              <motion.div 
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                className="bg-black/40 rounded-3xl p-6 border border-white/5 flex justify-between items-center"
+              >
+                <div className="text-left">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Resultado de Hoje</p>
+                  <p className={cn(
+                    "text-2xl font-black tracking-tighter",
+                    isProfit ? "text-emerald-400" : "text-red-400"
+                  )}>
+                    R$ {stats.profit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Trades</p>
+                  <p className="text-xl font-bold text-white tracking-tight">
+                    {stats.wins}W - {stats.losses}L
+                  </p>
+                </div>
+              </motion.div>
+
+              <motion.button
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.4 }}
+                onClick={onClose}
+                className={cn(
+                  "w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all active:scale-95",
+                  isProfit 
+                    ? "bg-emerald-500 hover:bg-emerald-400 text-emerald-950 shadow-lg shadow-emerald-500/25" 
+                    : "bg-red-500 hover:bg-red-400 text-red-950 shadow-lg shadow-red-500/25"
+                )}
+              >
+                Entendido, Fechar Painel
+              </motion.button>
+              
+              <p className="text-[9px] text-gray-600 font-bold uppercase tracking-widest uppercase">
+                Gestão Profitus Pro • {new Date().toLocaleDateString('pt-BR')}
+              </p>
             </div>
           </motion.div>
         </div>
@@ -677,6 +797,7 @@ export default function App() {
   const [aiSignal, setAiSignal] = useState<string | null>(null);
 
   const [preAlert, setPreAlert] = useState<string | null>(null);
+  const [showResultModal, setShowResultModal] = useState<{show: boolean, type: 'profit' | 'loss' | null}>({show: false, type: null});
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -824,15 +945,13 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
 
     // Check Risk Management
     if (config?.dailyProfitTarget && stats.profit >= config.dailyProfitTarget) {
-      setBotError("Meta diária atingida! Robô pausado.");
-      setTimeout(() => setBotError(''), 5000);
+      setShowResultModal({ show: true, type: 'profit' });
       if (config.isBotActive) toggleBot();
       return;
     }
 
     if (config?.dailyStopLoss && stats.profit <= -config.dailyStopLoss) {
-      setBotError("Stop Loss atingido! Robô pausado.");
-      setTimeout(() => setBotError(''), 5000);
+      setShowResultModal({ show: true, type: 'loss' });
       if (config.isBotActive) toggleBot();
       return;
     }
@@ -1218,14 +1337,17 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
     const nextActiveState = !config.isBotActive;
     console.log(`Bot: Alternando estado para ${nextActiveState ? 'ATIVO' : 'DESATIVADO'}`);
     
-    // Check usage before activating
+    // Check management limits before activating
     if (nextActiveState) {
       console.log(`Bot: Verificando condições para ativação. Dias: ${user.availableDays}, Saldo: ${user.balance}`);
       
-      if (!import.meta.env.VITE_GEMINI_API_KEY) {
-        console.log("Bot: Bloqueado por falta de chave API Gemini.");
-        setBotError("IA não configurada: Chave API Gemini ausente. Configure nos Segredos.");
-        setTimeout(() => setBotError(''), 8000);
+      // Block if Profit Target or Stop Loss is already reached
+      if (config.dailyProfitTarget && stats.profit >= config.dailyProfitTarget) {
+        setShowResultModal({ show: true, type: 'profit' });
+        return;
+      }
+      if (config.dailyStopLoss && stats.profit <= -config.dailyStopLoss) {
+        setShowResultModal({ show: true, type: 'loss' });
         return;
       }
 
@@ -3343,6 +3465,14 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
         onClose={() => setShowWithdrawModal(false)}
         onWithdraw={createWithdrawRequest}
         isCreating={isCreatingWithdraw}
+      />
+
+      <ResultModal
+        isOpen={showResultModal.show}
+        type={showResultModal.type}
+        onClose={() => setShowResultModal({ show: false, type: null })}
+        stats={stats}
+        config={config}
       />
 
       <EditCredentialsModal
