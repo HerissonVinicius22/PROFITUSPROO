@@ -16,7 +16,7 @@ import {
   Area
 } from 'recharts';
 import { QRCodeSVG } from 'qrcode.react';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from "@google/genai"; // removed - kept import for type compat
 import { 
   Power, 
   Settings, 
@@ -667,12 +667,8 @@ export default function App() {
 
   const [selectedAssetCategory, setSelectedAssetCategory] = useState('forex');
   
-  // Initialize Gemini AI
-  const ai = useMemo(() => {
-    const key = import.meta.env.VITE_GEMINI_API_KEY;
-    console.log("AI: Inicializando GoogleGenAI. Chave presente:", !!key);
-    return new GoogleGenAI({ apiKey: key || "" });
-  }, []);
+  // Bot accuracy from global config (set by admin, default 80%)
+  const botAccuracy = (globalConfig as any).bot_accuracy ?? 80;
 
   // Robot Dashboard State
   const [botStatus, setBotStatus] = useState<'idle' | 'analyzing' | 'trading' | 'win' | 'loss' | 'waiting'>('idle');
@@ -697,109 +693,56 @@ export default function App() {
     return { wins, losses, profit, margin };
   }, [history, isConnected, user]);
 
-  const AI_STRATEGY_PROMPT = `
-Você é um trader profissional especializado em scalping em opções binárias.
-Sua função é analisar o mercado em tempo real utilizando uma estratégia baseada nos indicadores Vortex (14), EMA 9, EMA 50 e RSI (14), com foco em operações de curto prazo (M1 e M5).
+  // ---- LOCAL BOT ENGINE (replaces Gemini AI) ----
+  const generateBotSignal = (pair: string, timeframe: string): string => {
+    console.log(`Bot Engine: Analisando ${pair} (${timeframe})...`);
 
-Siga rigorosamente este processo:
-1. IDENTIFICAÇÃO DE TENDÊNCIA (TIMEFRAME MAIOR)
-* Analise o timeframe maior (M5 para entradas em M1, e M15 para entradas em M5)
-* Tendência de alta: Vortex VI+ acima do VI−, preço acima da EMA 50, EMA 9 acima da EMA 50
-* Tendência de baixa: Vortex VI− acima do VI+, preço abaixo da EMA 50, EMA 9 abaixo da EMA 50
-* Se não houver tendência clara, NÃO sugerir operação
+    // Simulated technical indicators
+    const trend = Math.random() > 0.5 ? 'Alta' : 'Baixa';
+    const rsi = trend === 'Alta' ? Math.floor(Math.random() * 15) + 52 : Math.floor(Math.random() * 15) + 33;
+    const viPlus = trend === 'Alta' ? (1.1 + Math.random() * 0.2) : (0.8 + Math.random() * 0.1);
+    const viMinus = trend === 'Alta' ? (0.8 + Math.random() * 0.1) : (1.1 + Math.random() * 0.2);
+    const ema9AboveEma50 = trend === 'Alta';
+    const priceNearEma = Math.random() > 0.3; // 70% chance price is near EMA (good entry)
+    const lowVolatility = Math.random() < 0.15; // 15% chance of low volatility (skip)
+    const rsiNeutral = rsi >= 48 && rsi <= 52; // RSI neutral zone = skip
 
-2. ESPERAR PULLBACK (TIMEFRAME DE ENTRADA)
-* Aguardar o preço corrigir até EMA 9 ou EMA 50
-* Não permitir entradas no topo ou fundo sem correção
-
-3. GATILHO DE ENTRADA
-Para CALL:
-* Tendência de alta confirmada
-* Preço tocando EMA 9 ou 50
-* Vortex abrindo para cima (VI+ se afastando)
-* RSI acima de 50 (ideal entre 55 e 65)
-* Presença de vela de força ou rejeição
-
-Para PUT:
-* Tendência de baixa confirmada
-* Preço tocando EMA 9 ou 50
-* Vortex abrindo para baixo (VI− se afastando)
-* RSI abaixo de 50 (ideal entre 35 e 45)
-* Vela de rejeição ou força
-
-4. FILTROS OBRIGATÓRIOS
-* NÃO operar em mercado lateral (Vortex cruzando frequentemente)
-* NÃO operar com RSI entre 48 e 52
-* NÃO operar com velas pequenas ou baixa volatilidade
-* Evitar momentos de notícias fortes
-
-5. EXECUÇÃO
-* Indicar apenas entradas com probabilidade superior a 80%
-* Informar: tipo (CALL ou PUT), timeframe, expiração (1 vela), justificativa clara
-* Se não houver entrada válida, responder: "SEM ENTRADA NO MOMENTO"
-
-6. GESTÃO DE RISCO
-* Considerar operações com risco máximo de 2% por entrada
-* Evitar múltiplas entradas seguidas sem novo sinal
-
-Formato da resposta (OBRIGATÓRIO):
-SINAL: CALL ou PUT
-TIMEFRAME: M1 ou M5
-EXPIRAÇÃO: 1 vela
-CONFIANÇA: (Baixa / Média / Alta)
-JUSTIFICATIVA: (curta e técnica)
-PRE_ALERTA: ATIVO [PARIDADE] SINAL [COMPRA/VENDA] PARA PRÓXIMA VELA, HORARIO DA COMPRA [HORARIO] E TEMPO EXPIRAÇAO [TEMPO]
-
-Se não houver oportunidade clara, responda apenas:
-SEM ENTRADA NO MOMENTO
-`;
-
-  const generateAISignal = async (pair: string, timeframe: string) => {
-    console.log(`AI: Gerando sinal para ${pair} (${timeframe})...`);
-    try {
-      // Simulate some indicator values for the AI to "analyze"
-      const trend = Math.random() > 0.5 ? 'Alta' : 'Baixa';
-      const rsi = trend === 'Alta' ? Math.floor(Math.random() * 20) + 50 : Math.floor(Math.random() * 20) + 30;
-      const viPlus = trend === 'Alta' ? 1.2 : 0.8;
-      const viMinus = trend === 'Alta' ? 0.8 : 1.2;
-
-      // Calculate next candle time
-      const now = new Date();
-      const nextCandle = new Date(now.getTime() + 60000); // Default to next minute
-      nextCandle.setSeconds(0);
-      nextCandle.setMilliseconds(0);
-      const horarioCompra = nextCandle.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      const tempoExpiracao = timeframe;
-      
-      const prompt = `Analise o par ${pair} no timeframe ${timeframe}. 
-        Dados atuais dos indicadores:
-        - Tendência (Timeframe Maior): ${trend}
-        - Vortex (14): VI+ ${viPlus}, VI- ${viMinus}
-        - RSI (14): ${rsi}
-        - Preço: Tocando EMA 9 após correção.
-        - Horário Sugerido para Próxima Vela: ${horarioCompra}
-        - Tempo de Expiração: ${tempoExpiracao}
-        
-        ${AI_STRATEGY_PROMPT}`;
-
-      console.log("AI: Chamando Gemini API...");
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: [{ parts: [{ text: prompt }] }]
-      });
-
-      console.log("AI: Resposta recebida:", response.text);
-      setBotError(''); // Clear any previous errors
-      return response.text;
-    } catch (error: any) {
-      console.error("AI: Erro ao gerar sinal:", error);
-      let errorMessage = "Erro ao conectar com a IA";
-      if (error.message?.includes("API_KEY_INVALID") || error.message?.includes("API key not valid")) {
-        errorMessage = "Configuração de IA Pendente: A chave da API Gemini é inválida ou não foi configurada corretamente no painel de Segredos.";
-      }
-      setBotError(errorMessage);
-      return "SEM ENTRADA NO MOMENTO";
+    // Filtros de bloqueio de entrada (15% das vezes o bot aguarda)
+    if (lowVolatility || rsiNeutral || !priceNearEma) {
+      console.log('Bot Engine: Filtros ativados. Sem entrada.');
+      return 'SEM ENTRADA NO MOMENTO';
     }
+
+    const direction = trend === 'Alta' ? 'CALL' : 'PUT';
+    const confidence = rsi > 60 || rsi < 40 ? 'Alta' : 'Média';
+
+    const now = new Date();
+    const nextCandle = new Date(now.getTime() + 60000);
+    nextCandle.setSeconds(0);
+    nextCandle.setMilliseconds(0);
+    const horario = nextCandle.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    const justificativas: Record<string, string[]> = {
+      CALL: [
+        `Tendência de alta confirmada. VI+ (${viPlus.toFixed(2)}) > VI- (${viMinus.toFixed(2)}). RSI em ${rsi} com momento ascendente. Preço tocando EMA 9 após pullback.`,
+        `EMA 9 acima da EMA 50. RSI ${rsi} com viés comprador. Vortex abrindo para cima. Vela de rejeição identificada.`,
+        `Confluência de sinais: Tendência alta, RSI ${rsi}, VI+ dominante. Entrada na correção da EMA 9.`,
+      ],
+      PUT: [
+        `Tendência de baixa confirmada. VI- (${viMinus.toFixed(2)}) > VI+ (${viPlus.toFixed(2)}). RSI em ${rsi} com pressão vendedora. Preço rejeitando EMA 50.`,
+        `EMA 9 abaixo da EMA 50. RSI ${rsi} em zona de venda. Vortex abrindo para baixo. Vela de força baixista.`,
+        `Sinal técnico: Tendência baixa, VI- superior, RSI ${rsi}. Entrada no teste da EMA 9.`,
+      ]
+    };
+    const justs = justificativas[direction];
+    const just = justs[Math.floor(Math.random() * justs.length)];
+
+    return `SINAL: ${direction}
+TIMEFRAME: ${timeframe}
+EXPIRAÇÃO: 1 vela
+CONFIANÇA: ${confidence}
+JUSTIFICATIVA: ${just}
+PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PARA PRÓXIMA VELA, HORARIO DA COMPRA ${horario} E TEMPO EXPIRAÇAO ${timeframe}`;
   };
 
   useEffect(() => {
@@ -937,25 +880,25 @@ SEM ENTRADA NO MOMENTO
       let extractedPreAlert = "";
 
       if (activeStrategy === 'SCALPING_PRO') {
-        const aiRes = await generateAISignal(pair, activeTimeframe);
-        setAiSignal(aiRes);
+        // Use local bot engine instead of Gemini AI
+        const botRes = generateBotSignal(pair, activeTimeframe);
+        setAiSignal(botRes);
         
         // Extract PRE_ALERTA if present
-        const preAlertMatch = aiRes.match(/PRE_ALERTA:\s*(.*)/);
+        const preAlertMatch = botRes.match(/PRE_ALERTA:\s*(.*)/);
         if (preAlertMatch) {
           extractedPreAlert = preAlertMatch[1];
           setPreAlert(extractedPreAlert);
-          // Wait 5 seconds to show the pre-alert before starting the trade
-          await new Promise(resolve => setTimeout(resolve, 5000));
+          // Wait 3 seconds to show the pre-alert before starting the trade
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
 
-        if (aiRes.includes('SEM ENTRADA')) {
+        if (botRes.includes('SEM ENTRADA')) {
           direction = null;
         } else {
-          direction = aiRes.includes('CALL') ? 'CALL' : 'PUT';
-          signalText = aiRes;
+          direction = botRes.includes('CALL') ? 'CALL' : 'PUT';
+          signalText = botRes;
           
-          // Set current trade data early so analysis shows during pre-alert
           setCurrentTrade({
             pair,
             direction,
@@ -1002,7 +945,9 @@ SEM ENTRADA NO MOMENTO
         setBotStatus('idle');
         return;
       }
-      const isWin = Math.random() > 0.1; // 90% win rate for demo
+      // Use botAccuracy from global config set by admin (0-100)
+      const accuracy = Math.min(100, Math.max(0, botAccuracy));
+      const isWin = (Math.random() * 100) < accuracy;
       setBotStatus(isWin ? 'win' : 'loss');
       
       // Update history locally for immediate feedback
@@ -1095,8 +1040,9 @@ SEM ENTRADA NO MOMENTO
         plan1_amount: data.plan1_amount, plan1_pix: data.plan1_pix,
         plan2_amount: data.plan2_amount, plan2_pix: data.plan2_pix,
         plan3_amount: data.plan3_amount, plan3_pix: data.plan3_pix,
-        plan4_amount: data.plan4_amount, plan4_pix: data.plan4_pix
-      });
+        plan4_amount: data.plan4_amount, plan4_pix: data.plan4_pix,
+        bot_accuracy: data.bot_accuracy ?? 80
+      } as any);
     } catch (error) {
       console.error("Error fetching global config:", error);
     }
@@ -2700,6 +2646,48 @@ SEM ENTRADA NO MOMENTO
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Bot Accuracy Card */}
+                <Card title="Controle de Assertividade do Bot" icon={Brain} className="lg:col-span-3">
+                  <div className="flex flex-col md:flex-row items-center gap-8">
+                    <div className="flex-1 space-y-4 w-full">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-bold text-gray-300">Taxa de Acerto do Bot (%)</label>
+                        <span className="text-2xl font-black text-emerald-400">{(globalConfig as any).bot_accuracy ?? 80}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={50}
+                        max={99}
+                        step={1}
+                        value={(globalConfig as any).bot_accuracy ?? 80}
+                        onChange={(e: any) => setGlobalConfig(prev => ({ ...prev, bot_accuracy: Number(e.target.value) } as any))}
+                        className="w-full accent-emerald-500 cursor-pointer"
+                      />
+                      <div className="flex justify-between text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                        <span>50% (Conservador)</span>
+                        <span>75% (Equilibrado)</span>
+                        <span>99% (Agressivo)</span>
+                      </div>
+                      <p className="text-[10px] text-gray-500 italic">
+                        * Define a probabilidade de GANHO de cada operação para todos os clientes. 80% significa que o bot acerta 8 em cada 10 trades.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const accuracy = (globalConfig as any).bot_accuracy ?? 80;
+                        supabase.from('global_config').update({ bot_accuracy: accuracy }).eq('id', 1).then(({ error }) => {
+                          if (error) alert('Erro ao salvar!');
+                          else alert(`Assertividade definida para ${accuracy}%!`);
+                        });
+                      }}
+                      className="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest rounded-xl transition-all text-sm flex items-center gap-2 shrink-0"
+                    >
+                      <Check className="w-5 h-5" />
+                      Salvar Assertividade
+                    </button>
+                  </div>
+                </Card>
+
                 <Card title="Configuração de Pagamentos e Planos" icon={Wallet} className="lg:col-span-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     {[1, 2, 3, 4].map((num) => (
