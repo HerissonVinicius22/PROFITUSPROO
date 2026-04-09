@@ -777,7 +777,7 @@ export default function App() {
   const [requestSent, setRequestSent] = useState(false);
   const [depositAmount, setDepositAmount] = useState<number>(50);
 
-  const assetCategories = useMemo(() => [
+  const allAssetCategories = useMemo(() => [
     { id: 'forex', name: 'Moedas', icon: DollarSign, assets: ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'EUR/GBP', 'USD/CAD', 'NZD/USD', 'USD/CHF'] },
     { id: 'crypto', name: 'Criptomoedas', icon: Bitcoin, assets: ['BTC/USD', 'ETH/USD', 'LTC/USD', 'XRP/USD', 'SOL/USD', 'ADA/USD', 'DOT/USD'] },
     { id: 'commodities', name: 'Commodities', icon: Droplets, assets: ['GOLD', 'SILVER', 'OIL', 'BRENT', 'GAS', 'COPPER'] },
@@ -785,8 +785,21 @@ export default function App() {
     { id: 'indices', name: 'Índices', icon: TrendingUp, assets: ['S&P500', 'NASDAQ', 'DOWJONES', 'DAX', 'FTSE100', 'CAC40'] },
   ], []);
 
+  const assetCategories = useMemo(() => {
+    const disabled = (globalConfig as any).disabled_niches || [];
+    return allAssetCategories.filter(cat => !disabled.includes(cat.id));
+  }, [allAssetCategories, globalConfig.disabled_niches]);
+
   const [selectedAssetCategory, setSelectedAssetCategory] = useState('forex');
   
+  // Auto-reset selected category if it gets disabled by admin
+  useEffect(() => {
+    const activeIds = assetCategories.map(c => c.id);
+    if (!activeIds.includes(selectedAssetCategory) && activeIds.length > 0) {
+      setSelectedAssetCategory(activeIds[0]);
+    }
+  }, [assetCategories, selectedAssetCategory]);
+
   // Bot accuracy from global config (set by admin, default 80%)
   const botAccuracy = (globalConfig as any).bot_accuracy ?? 80;
 
@@ -1160,7 +1173,8 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
         plan2_amount: data.plan2_amount, plan2_pix: data.plan2_pix,
         plan3_amount: data.plan3_amount, plan3_pix: data.plan3_pix,
         plan4_amount: data.plan4_amount, plan4_pix: data.plan4_pix,
-        bot_accuracy: data.bot_accuracy ?? 80
+        bot_accuracy: data.bot_accuracy ?? 80,
+        disabled_niches: data.disabled_niches || []
       } as any);
     } catch (error) {
       console.error("Error fetching global config:", error);
@@ -2768,6 +2782,65 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Niche Management Card */}
+                <Card title="Gerenciamento de Nichos de Mercado" icon={Target} className="lg:col-span-3">
+                  <p className="text-gray-400 text-sm mb-6">Ative ou desative categorias inteiras de ativos para todos os usuários.</p>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                    {allAssetCategories.map((niche) => {
+                      const isDisabled = ((globalConfig as any).disabled_niches || []).includes(niche.id);
+                      return (
+                        <div 
+                          key={niche.id}
+                          className={cn(
+                            "p-4 rounded-2xl border transition-all flex flex-col items-center gap-3 text-center",
+                            isDisabled 
+                              ? "bg-red-500/5 border-red-500/20 opacity-60" 
+                              : "bg-emerald-500/5 border-emerald-500/20"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-10 h-10 rounded-full flex items-center justify-center",
+                            isDisabled ? "bg-red-500/20 text-red-500" : "bg-emerald-500/20 text-emerald-500"
+                          )}>
+                            <niche.icon className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-white mb-1">{niche.name}</p>
+                            <p className={cn(
+                              "text-[8px] font-black uppercase tracking-widest",
+                              isDisabled ? "text-red-400" : "text-emerald-400"
+                            )}>
+                              {isDisabled ? 'Desativado' : 'Ativo'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const currentDisabled = (globalConfig as any).disabled_niches || [];
+                              const nextDisabled = isDisabled 
+                                ? currentDisabled.filter((id: string) => id !== niche.id)
+                                : [...currentDisabled, niche.id];
+                              
+                              setGlobalConfig(prev => ({ ...prev, disabled_niches: nextDisabled } as any));
+                              
+                              supabase.from('global_config').update({ disabled_niches: nextDisabled }).eq('id', 1).then(({ error }) => {
+                                if (error) alert('Erro ao atualizar nicho!');
+                              });
+                            }}
+                            className={cn(
+                              "w-full py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                              isDisabled 
+                                ? "bg-emerald-600 hover:bg-emerald-500 text-white" 
+                                : "bg-red-600 hover:bg-red-500 text-white"
+                            )}
+                          >
+                            {isDisabled ? 'Ativar' : 'Desativar'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+
                 {/* Bot Accuracy Card */}
                 <Card title="Controle de Assertividade do Bot" icon={Brain} className="lg:col-span-3">
                   <div className="flex flex-col md:flex-row items-center gap-8">
@@ -2850,7 +2923,9 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
                           plan1_amount: globalConfig.plan1_amount, plan1_pix: globalConfig.plan1_pix,
                           plan2_amount: globalConfig.plan2_amount, plan2_pix: globalConfig.plan2_pix,
                           plan3_amount: globalConfig.plan3_amount, plan3_pix: globalConfig.plan3_pix,
-                          plan4_amount: globalConfig.plan4_amount, plan4_pix: globalConfig.plan4_pix
+                          plan4_amount: globalConfig.plan4_amount, plan4_pix: globalConfig.plan4_pix,
+                          bot_accuracy: (globalConfig as any).bot_accuracy,
+                          disabled_niches: (globalConfig as any).disabled_niches
                         }).eq('id', 1).then(({ error }) => {
                           if (error) alert('Erro ao salvar no banco.');
                           else alert('Configurações de Planos e PIX salvas!');

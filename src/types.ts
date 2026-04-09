@@ -27,6 +27,7 @@ export interface GlobalConfig {
   plan3_pix: string;
   plan4_amount: number;
   plan4_pix: string;
+  disabled_niches: string[];
 }
 
 export interface BacktestResult {
