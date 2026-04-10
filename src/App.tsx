@@ -820,9 +820,8 @@ export default function App() {
     const losses = todayTrades.filter(h => h.result === 'loss').length;
     const profit = todayTrades.reduce((acc, h) => acc + (h.value || 0), 0);
     
-    // Calculate total profit from all history to get margin
-    const totalProfit = history.reduce((acc, h) => acc + (h.value || 0), 0);
-    const margin = (user?.balance || 0) + totalProfit;
+    // Margin is now equal to user.balance (which is updated in real-time)
+    const margin = (user?.balance || 0);
 
     return { wins, losses, profit, margin };
   }, [history, isConnected, user]);
@@ -1096,8 +1095,11 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
         isAutoTrade: config?.isAutoTrade
       };
       
-      // Persist to backend
+      // Persist to backend and Update Balance
       if (user?.uid) {
+        const newBalance = (user.balance || 0) + tradeValue;
+        
+        // Update trades table
         supabase.from('trades').insert([{
            id: Math.random().toString(36).substr(2, 9),
            user_id: user.uid,
@@ -1109,6 +1111,16 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
         }]).then(({ error }) => {
            if (error) console.error("Error saving trade:", error);
         });
+
+        // Update users table balance
+        supabase.from('users').update({ balance: newBalance }).eq('uid', user.uid).then(({ error }) => {
+          if (error) console.error("Error updating user balance:", error);
+        });
+
+        // Update local state
+        const updatedUser = { ...user, balance: newBalance };
+        setUser(updatedUser);
+        localStorage.setItem('profitus_user', JSON.stringify(updatedUser));
       }
 
       setHistory(prev => [{ ...newTrade, id: Math.random().toString(36).substr(2, 9) }, ...prev]);
@@ -2549,7 +2561,12 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
-                      {(isConnected ? history : []).map((trade) => (
+                      {(isConnected ? history : [])
+                        .filter(trade => {
+                          const today = new Date().toISOString().split('T')[0];
+                          return trade.exitTime?.split('T')[0] === today;
+                        })
+                        .map((trade) => (
                         <tr key={trade.id} className="group hover:bg-white/5 transition-colors">
                           <td className="py-4">
                             <div className="flex items-center gap-3">
