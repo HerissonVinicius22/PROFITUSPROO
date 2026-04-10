@@ -1576,6 +1576,20 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
       };
       const { error } = await supabase.from('withdraw_requests').insert([newReq]);
       if (!error) {
+        // Update user balance in DB
+        const newBalance = (user.balance || 0) - amount;
+        await supabase.from('users').update({ balance: newBalance }).eq('uid', user.uid);
+        
+        // Update local status
+        const updatedUser = { ...user, balance: newBalance };
+        setUser(updatedUser);
+        localStorage.setItem('profitus_user', JSON.stringify(updatedUser));
+        
+        // Update local withdrawal list
+        const formattedReq = { ...newReq, userId: newReq.user_id, createdAt: new Date().toISOString() };
+        setUserWithdrawals(prev => [formattedReq, ...prev]);
+        setWithdrawRequests(prev => [formattedReq, ...prev]);
+
         setShowWithdrawModal(false);
         alert("Solicitação de saque enviada com sucesso! Prazo de até 48 horas.");
       }
@@ -1588,9 +1602,30 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
 
   const updateWithdrawStatus = async (id: string, status: 'completed' | 'cancelled') => {
     try {
+      // Find the request first to get amount and user_id
+      const { data: request, error: fetchError } = await supabase.from('withdraw_requests').select('*').eq('id', id).single();
+      if (fetchError || !request) return;
+
       const { error } = await supabase.from('withdraw_requests').update({ status }).eq('id', id);
       if (!error) {
         setWithdrawRequests(prev => prev.map(w => w.id === id ? { ...w, status } : w));
+        
+        // If cancelled, refund balance
+        if (status === 'cancelled') {
+           const { data: userData } = await supabase.from('users').select('balance').eq('uid', request.user_id).single();
+           if (userData) {
+              const newBalance = (userData.balance || 0) + Number(request.amount);
+              await supabase.from('users').update({ balance: newBalance }).eq('uid', request.user_id);
+              
+              // If the cancelled withdrawal belongs to the current logged-in user, update local state
+              if (user && user.uid === request.user_id) {
+                const updatedUser = { ...user, balance: newBalance };
+                setUser(updatedUser);
+                localStorage.setItem('profitus_user', JSON.stringify(updatedUser));
+                setUserWithdrawals(prev => prev.map(w => w.id === id ? { ...w, status: 'cancelled' } : w));
+              }
+           }
+        }
       }
     } catch (error) {
       console.error("Error updating withdraw status:", error);
@@ -2558,6 +2593,55 @@ PRE_ALERTA: ATIVO ${pair} SINAL ${direction === 'CALL' ? 'COMPRA' : 'VENDA'} PAR
                         <tr>
                           <td colSpan={5} className="py-10 text-center text-green-700/60 font-medium italic">
                             Nenhuma operação realizada ainda.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+              <Card title="Histórico de Saques" icon={Wallet}>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left border-b border-white/5">
+                        <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Data</th>
+                        <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Método</th>
+                        <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Valor</th>
+                        <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {userWithdrawals.map((w) => (
+                        <tr key={w.id} className="group hover:bg-white/5 transition-colors">
+                          <td className="py-4 text-xs text-white font-medium">
+                            {new Date(w.createdAt).toLocaleDateString('pt-BR')} {new Date(w.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="py-4">
+                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest bg-white/5 px-2 py-1 rounded-lg">
+                              {w.method}
+                            </span>
+                          </td>
+                          <td className="py-4 text-sm font-black text-white">
+                            R$ {Number(w.amount).toFixed(2)}
+                          </td>
+                          <td className="py-4 text-right">
+                             <span className={cn(
+                               "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider",
+                               w.status === 'completed' ? "bg-emerald-500/10 text-emerald-400" :
+                               w.status === 'pending' ? "bg-amber-500/10 text-amber-400" :
+                               "bg-red-500/10 text-red-400"
+                             )}>
+                               {w.status === 'completed' ? 'Concluído' : 
+                                w.status === 'pending' ? 'Pendente' : 'Cancelado'}
+                             </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {userWithdrawals.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="py-10 text-center text-green-700/60 font-medium italic">
+                            Nenhuma solicitação de saque encontrada.
                           </td>
                         </tr>
                       )}
